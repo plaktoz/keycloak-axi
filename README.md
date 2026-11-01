@@ -7,6 +7,59 @@
 
 ---
 
+## Build and run
+
+This section is about the code in `src/kc_axi/`. The numbered sections below are the spec.
+
+**Build.** Python 3.11 or later. The one dependency is PyYAML.
+
+```bash
+cd keycloak-axi
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'     # editable: the code you edit is the code that runs
+.venv/bin/kc-axi --version
+```
+
+**Test.** The suite uses stub runtimes and a fake Keycloak, so it needs no container. It takes about two minutes. Tests that need a real container runtime skip when none is present.
+
+```bash
+.venv/bin/pytest -q
+```
+
+**Configure.** A command that talks to Keycloak reads a YAML file. The path comes from `--config PATH`, then `KC_AXI_CONFIG`, then the OS default (`~/Library/Application Support/kc-axi/config.yaml` on macOS, `$XDG_CONFIG_HOME/kc-axi/config.yaml` on Linux). Every key is in section 6.1. A minimal file for a local server:
+
+```yaml
+schema_version: 1
+base_url: http://127.0.0.1:8080
+port: 8080
+default_realm: my-realm
+runtime: podman                        # podman | docker | auto
+container_name: keycloak-dev
+image: quay.io/keycloak/keycloak:26.6.4
+volume: keycloak-dev-data
+admin_password_file: ~/.config/kc-axi/admin-password   # mode 0600; or set KC_ADMIN_PASSWORD
+audit_path: ~/.config/kc-axi/audit.jsonl
+secrets_dir: ~/.config/kc-axi/secrets
+```
+
+**Run.** Add `--json` to any command for the JSON form.
+
+```bash
+kc-axi --config ./config.yaml realms
+kc-axi --config ./config.yaml --realm my-realm users
+kc-axi --config ./config.yaml plan  --file my-realm.config.yaml
+kc-axi --config ./config.yaml apply --file my-realm.config.yaml --yes
+# Whole realm in one file, with users' password hashes and signing keys (section 5.12).
+# The container stops for about 10 seconds. --out must lie outside any git work tree.
+kc-axi --config ./config.yaml --realm my-realm export-realm --scope full --out ~/keycloak-exports/my-realm.json --yes
+```
+
+The full file holds password hashes and realm signing keys. Keep it owner-only and out of git. The tool writes it with mode 0600.
+
+**Status of the commands (2026-11-01).** Wired in the CLI: `realms`, `clients`, `users`, `get`, `plan`, `apply` (config file only), `export-realm --scope full`. Not wired yet, so they exit 2 `usage` ("not built yet"): `up`, `down`, `status`, `import-realm`, `export-realm --scope config|users`, `secrets`, `reset-password`, `disable-user`, `disable-client`. `docs/tasks-kc-axi-implementation.md` lists the tasks and their state.
+
+---
+
 ## 1. Purpose
 
 The tool does two jobs:

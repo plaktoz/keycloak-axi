@@ -23,7 +23,39 @@ nav.toc ol{margin:.3em 0;padding-left:1.4em}
 </style></head><body><main>
 <h1 id="kc-axi">kc-axi</h1>
 <blockquote><p>Standalone library spec · Draft v0.4 · Moved on 2026-11-01 from <code>libs/kc-axi/</code> in the agentzero-v2-dev repo (UMAS)</p><p><strong>Independence:</strong> no dependency on any consuming project, AI model or other library. The tool talks to a Keycloak server. For <code>up</code>, <code>down</code> and <code>status</code>, it calls a Docker or Podman CLI. It keeps no database. It keeps two kinds of local file: desired-state files and a secrets directory.</p><p><strong>Revision:</strong> v0.4 applies the owner answers of 2026-10-27 and closes the non-decision findings of the round 2 caller assessments. Reports: <code>docs/assessments/caller-assessment-kc-axi-*-round2-2026-10-27.md</code>.</p></blockquote>
-<nav class="toc" aria-label="Contents"><strong>Contents</strong><ol><li><a href="#1-purpose">1. Purpose</a></li><li><a href="#2-scope-and-non-goals">2. Scope and Non-Goals</a></li><li><a href="#3-concepts-and-data-model">3. Concepts and Data Model</a></li><li><a href="#4-interface">4. Interface</a></li><li><a href="#5-behaviour">5. Behaviour</a></li><li><a href="#6-configuration">6. Configuration</a></li><li><a href="#7-failure-modes">7. Failure Modes</a></li><li><a href="#8-acceptance-criteria">8. Acceptance Criteria</a></li><li><a href="#9-known-consumers">9. Known Consumers</a></li><li><a href="#10-source-material-and-deviations">10. Source Material and Deviations</a></li><li><a href="#11-open-questions-and-evidence">11. Open Questions and Evidence</a></li></ol></nav>
+<nav class="toc" aria-label="Contents"><strong>Contents</strong><ol><li><a href="#build-and-run">Build and run</a></li><li><a href="#1-purpose">1. Purpose</a></li><li><a href="#2-scope-and-non-goals">2. Scope and Non-Goals</a></li><li><a href="#3-concepts-and-data-model">3. Concepts and Data Model</a></li><li><a href="#4-interface">4. Interface</a></li><li><a href="#5-behaviour">5. Behaviour</a></li><li><a href="#6-configuration">6. Configuration</a></li><li><a href="#7-failure-modes">7. Failure Modes</a></li><li><a href="#8-acceptance-criteria">8. Acceptance Criteria</a></li><li><a href="#9-known-consumers">9. Known Consumers</a></li><li><a href="#10-source-material-and-deviations">10. Source Material and Deviations</a></li><li><a href="#11-open-questions-and-evidence">11. Open Questions and Evidence</a></li></ol></nav>
+<hr>
+<h2 id="build-and-run">Build and run</h2>
+<p>This section is about the code in <code>src/kc_axi/</code>. The numbered sections below are the spec.</p>
+<p><strong>Build.</strong> Python 3.11 or later. The one dependency is PyYAML.</p>
+<pre><code class="lang-bash">cd keycloak-axi
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'     # editable: the code you edit is the code that runs
+.venv/bin/kc-axi --version</code></pre>
+<p><strong>Test.</strong> The suite uses stub runtimes and a fake Keycloak, so it needs no container. It takes about two minutes. Tests that need a real container runtime skip when none is present.</p>
+<pre><code class="lang-bash">.venv/bin/pytest -q</code></pre>
+<p><strong>Configure.</strong> A command that talks to Keycloak reads a YAML file. The path comes from <code>--config PATH</code>, then <code>KC_AXI_CONFIG</code>, then the OS default (<code>~/Library/Application Support/kc-axi/config.yaml</code> on macOS, <code>$XDG_CONFIG_HOME/kc-axi/config.yaml</code> on Linux). Every key is in section 6.1. A minimal file for a local server:</p>
+<pre><code class="lang-yaml">schema_version: 1
+base_url: http://127.0.0.1:8080
+port: 8080
+default_realm: my-realm
+runtime: podman                        # podman | docker | auto
+container_name: keycloak-dev
+image: quay.io/keycloak/keycloak:26.6.4
+volume: keycloak-dev-data
+admin_password_file: ~/.config/kc-axi/admin-password   # mode 0600; or set KC_ADMIN_PASSWORD
+audit_path: ~/.config/kc-axi/audit.jsonl
+secrets_dir: ~/.config/kc-axi/secrets</code></pre>
+<p><strong>Run.</strong> Add <code>--json</code> to any command for the JSON form.</p>
+<pre><code class="lang-bash">kc-axi --config ./config.yaml realms
+kc-axi --config ./config.yaml --realm my-realm users
+kc-axi --config ./config.yaml plan  --file my-realm.config.yaml
+kc-axi --config ./config.yaml apply --file my-realm.config.yaml --yes
+# Whole realm in one file, with users' password hashes and signing keys (section 5.12).
+# The container stops for about 10 seconds. --out must lie outside any git work tree.
+kc-axi --config ./config.yaml --realm my-realm export-realm --scope full --out ~/keycloak-exports/my-realm.json --yes</code></pre>
+<p>The full file holds password hashes and realm signing keys. Keep it owner-only and out of git. The tool writes it with mode 0600.</p>
+<p><strong>Status of the commands (2026-11-01).</strong> Wired in the CLI: <code>realms</code>, <code>clients</code>, <code>users</code>, <code>get</code>, <code>plan</code>, <code>apply</code> (config file only), <code>export-realm --scope full</code>. Not wired yet, so they exit 2 <code>usage</code> ("not built yet"): <code>up</code>, <code>down</code>, <code>status</code>, <code>import-realm</code>, <code>export-realm --scope config|users</code>, <code>secrets</code>, <code>reset-password</code>, <code>disable-user</code>, <code>disable-client</code>. <code>docs/tasks-kc-axi-implementation.md</code> lists the tasks and their state.</p>
 <hr>
 <h2 id="1-purpose">1. Purpose</h2>
 <p>The tool does two jobs:</p>

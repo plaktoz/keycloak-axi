@@ -222,6 +222,26 @@ def test_c89_backup_is_written_before_the_delete(env, kc, stubs, monkeypatch):  
     assert [u["username"] for u in kc.realms[REALM]["users"]] == ["alice"]
 
 
+def test_c89_failed_backup_directory_exits_1_file_failed_and_changes_nothing(env, kc, stubs, monkeypatch):  # noqa: F811
+    # Criterion 89: the backup cannot be written. The result is a typed error, not a traceback, and no DELETE is sent.
+    # The lock is taken first in the same directory, so the failure is injected at the backup's own mkdtemp call.
+    import tempfile
+    kc.realms[REALM] = _doc(["alice"])
+    stubs.install("podman")
+    stubs.set("podman", ls_states=RUNNING_TWICE, container_inspect_stdout=inspect_json("running"))
+
+    def refuse(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", refuse)
+    new = _write_file(env.tmp / "new.json", _doc(["john"]))
+    code, body = run_json("import-realm", "--realm", REALM, "--file", str(new), "--yes")
+    assert code == 1
+    assert body["error"]["code"] == "file_failed"
+    assert kc.deleted_realms == [], "no delete may happen when the backup could not be written"
+    assert [u["username"] for u in kc.realms[REALM]["users"]] == ["alice"]
+
+
 def test_c89_backup_file_is_owner_only_and_kept_in_secrets_dir(env, kc, stubs, monkeypatch):  # noqa: F811
     kc.realms[REALM] = _doc(["alice"])
     stubs.install("podman")

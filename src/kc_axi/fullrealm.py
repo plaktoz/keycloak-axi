@@ -208,7 +208,10 @@ def _backup_path(secrets_dir: Path, realm: str) -> Path:
 
 def _take_backup(rt: runtime.RuntimeSettings, realm: str, secrets_dir: Path, password: str, before_stop: Any) -> Path:
     """Steps 5 and 4 to 6 of the export: the file goes to `secrets_dir`, owner-only, and the work directory is removed."""
-    workdir = Path(tempfile.mkdtemp(prefix="backup-", dir=secrets_dir))
+    try:
+        workdir = Path(tempfile.mkdtemp(prefix="backup-", dir=secrets_dir))
+    except OSError as exc:
+        raise _file_failed(secrets_dir, exc) from exc  # before the stop and before the delete
     try:
         exported = runtime.export_realm_offline(rt, realm, workdir, before_stop=before_stop)
         _, text = read_realm_file(exported, realm)

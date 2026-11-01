@@ -178,11 +178,11 @@ Nothing in this list is committed. Commit only when the owner asks. Once asked, 
   - Depends on: I2c, I7, I8. Build the hook points together with those tasks.
   - Status: not started.
 
-- [ ] **I19. Offline export helper in the runtime.** Spec §5.12 (export steps 4 and 5), §5.3.1.
+- [x] **I19. Offline export helper in the runtime.** Spec §5.12 (export steps 4 and 5), §5.3.1.
   - Does: a stop helper for the container. A run of the image on the data volume, with `export --realm R --users realm_file --dir <dir>`, into a new owner-only directory under `secrets_dir`. The container starts again in a `finally`, also when the export fails. The check of the exported file and the removal of its directory are the callers' work (I20, I21). Refuse `--realm` values that are not a plain realm name, before any argument reaches the runtime.
   - Acceptance: C86 (restart on a failed export). Runtime stub tests. A live check of the export with the real image, on the throw-away server, is in I22.
   - Depends on: I4, I8.
-  - Status: not started.
+  - Status: `[x]` done 2026-11-01. `runtime.export_realm_offline` stops the container, runs the image once as `<container>-export` on the data volume, copies `R-realm.json` out with `cp` (no host path is mounted, so no uid mapping problem on rootless Podman), and always removes the one-off container and starts the server again. A failed export is reported before a failed restart. A realm name that is not plain exits 2 `config_invalid` before any runtime call. Also registered `import_invalid`, `import_partial` and the `import` audit action, which the C55 registry test needed once the spec listed them. Spec §5.12 step 4 now describes the `cp` design. Verified: 11 new stub tests in `tests/test_export_offline.py`; full suite 633 passed, 4 skipped. Not run against a real runtime yet (I22).
 - [ ] **I20. `export-realm --scope full`.** Spec §5.12 (export), §4.1, §4.3, §5.7.
   - Does: `--scope full --out PATH`. Refuses `admin_realm`, an `--out` inside a git work tree (`unsafe_path`), a missing audit path, and an existing `--out` without `--yes`. Takes the lock, writes the `intent` record with action `export`, calls I19, checks the file (JSON, `realm` equals R, no admin password in it), writes it owner-only and removes the directory, then writes the `result` record. Output `status: written`. Any failure leaves no file at `--out`.
   - Acceptance: C84, C85, C86, and the export half of C69. The `scope` values `config` and `users` keep their I10 behaviour.

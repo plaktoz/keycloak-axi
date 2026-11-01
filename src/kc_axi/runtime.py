@@ -22,6 +22,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from .errors import KcAxiError
@@ -513,6 +514,12 @@ def up(
     }
 
 
+def _stop(settings: RuntimeSettings, runtime: str) -> None:
+    proc = _run([runtime, "stop", "-t", str(STOP_SECONDS), settings.container_name], timeout=settings.runtime_timeout_seconds)
+    if proc.returncode != 0:
+        raise KcAxiError("runtime_failed", _text(proc, (settings.admin_password,)))
+
+
 # ---------------------------------------------------------------- down (section 5.3)
 
 
@@ -567,16 +574,118 @@ def down(settings: RuntimeSettings, *, purge: bool = False, yes: bool = False) -
     if runtime is None:
         raise AssertionError("down found a container but no runtime")
 
-    secrets = (settings.admin_password,)
-    proc = _run([runtime, "stop", "-t", str(STOP_SECONDS), name], timeout=timeout)
-    if proc.returncode != 0:
-        raise KcAxiError("runtime_failed", _text(proc, secrets))
+    _stop(settings, runtime)
     proc = _run([runtime, "rm", name], timeout=timeout)
     if proc.returncode != 0:
-        raise KcAxiError("runtime_failed", _text(proc, secrets))
+        raise KcAxiError("runtime_failed", _text(proc, (settings.admin_password,)))
 
     volume_result = _remove_volume(runtime, settings.volume, timeout) if purge_named else kept_or_none
     return {"status": "removed", "runtime": runtime, "container": name, "volume": volume_result}
+
+
+# ---------------------------------------------------------------- offline export (spec 5.12, export steps 2 to 5)
+
+EXPORT_DIR = "/tmp/kc-axi-export"  # inside the export run; the image user (1000) can write there
+REALM_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")  # a leading "-" would read as an option of kc.sh
+
+
+def _export_name(settings: RuntimeSettings) -> str:
+    return f"{settings.container_name}-export"
+
+
+def _export_remove(settings: RuntimeSettings, runtime: str) -> None:
+    """Remove the one-off export container. Its result does not matter: the next run removes a leftover first."""
+    try:
+        _run([runtime, "rm", "-f", _export_name(settings)], timeout=settings.runtime_timeout_seconds)
+    except KcAxiError:
+        pass
+
+
+def _export_run(settings: RuntimeSettings, runtime: str, mount: str, realm: str) -> None:
+    """Step 4. The export runs offline on the data volume. No secret is passed: the export needs none."""
+    _export_remove(settings, runtime)  # a container left by a crash would block the name
+    argv = [
+        runtime, "run", "--name", _export_name(settings), "-v", mount, settings.image,
+        "export", "--realm", realm, "--users", "realm_file", "--dir", EXPORT_DIR,
+    ]
+    proc = _run(argv, timeout=settings.pull_timeout_seconds, timeout_key="pull_timeout_seconds")
+    if proc.returncode != 0:
+        raise KcAxiError("runtime_failed", _text(proc))
+
+
+def _export_copy(settings: RuntimeSettings, runtime: str, realm: str, workdir: Path) -> Path:
+    """Copy the realm file out of the export container, owner-only. The file is the only thing copied."""
+    target = workdir / f"{realm}-realm.json"
+    source = f"{_export_name(settings)}:{EXPORT_DIR}/{realm}-realm.json"
+    proc = _run([runtime, "cp", source, str(target)], timeout=settings.runtime_timeout_seconds)
+    if proc.returncode != 0:
+        raise KcAxiError("runtime_failed", _text(proc))
+    if not target.is_file():
+        raise KcAxiError("runtime_failed", "the export run wrote no realm file")
+    os.chmod(target, 0o600)
+    return target
+
+
+def export_realm_offline(
+    settings: RuntimeSettings,
+    realm: str,
+    workdir: Path,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> Path:
+    """Spec 5.12, export steps 2 to 5. Returns the path of the realm file inside `workdir`.
+
+    `workdir` is a new, owner-only directory that the caller made and that the caller removes (step 6). The
+    container starts again and becomes ready in a `finally`, also when the export fails (criterion 86). A failed
+    export is reported first. A failed restart is reported only when the export succeeded.
+    """
+    if not REALM_NAME.fullmatch(realm):
+        raise KcAxiError(
+            "config_invalid",
+            f"realm {realm!r} is not a plain realm name",
+            help=("use letters, digits, _, . and -, and do not start with -",),
+        )
+    kind, mount = _volume_mount(settings)
+    if mount is None:
+        raise KcAxiError(
+            "volume_invalid",
+            "a full export reads the realm from the data volume, and volume is empty",
+            help=("set volume to a name or a host path",),
+        )
+    target = _resolve(settings, action="status")
+    if not target.state or target.runtime is None:
+        raise KcAxiError("not_found", f"container {settings.container_name} does not exist", help=("kc-axi up",))
+    if target.state != "running" and target.state not in STOPPED_STATES:
+        raise KcAxiError("container_state", f"container {settings.container_name} is in state {target.state}", help=("kc-axi status",), state=target.state)
+    runtime = target.runtime
+
+    exported: Path | None = None
+    failure: KcAxiError | None = None
+    restart_failure: KcAxiError | None = None
+    try:
+        if target.state == "running":
+            _stop(settings, runtime)
+        _export_run(settings, runtime, mount, realm)
+        exported = _export_copy(settings, runtime, realm, workdir)
+    except KcAxiError as err:
+        failure = err
+    finally:
+        _export_remove(settings, runtime)
+        try:
+            _start(settings, runtime)
+            _wait_ready(settings, runtime, sleep=sleep, clock=clock)
+        except KcAxiError as err:
+            restart_failure = err
+
+    if failure is not None:
+        if restart_failure is not None:
+            failure.fields["restart_code"] = restart_failure.code
+        raise failure
+    if restart_failure is not None:
+        raise restart_failure
+    assert exported is not None  # the export succeeded when neither error was raised
+    return exported
 
 
 # ---------------------------------------------------------------- status (section 5.3)

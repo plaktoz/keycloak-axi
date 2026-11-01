@@ -63,6 +63,232 @@ The full file holds password hashes and realm signing keys. Keep it owner-only a
 
 ---
 
+## Tutorial: a throw-away Keycloak in 10 minutes
+
+This tutorial starts a Keycloak container named `keycloak-tutorial`, creates a realm with two clients from a file, backs the realm up, breaks it on purpose, restores it, and removes everything. Every command can be copied and pasted. Run the blocks in order, in one terminal.
+
+Checked on 2026-11-01: macOS, Podman 6.1.4, Keycloak 26.6.4, Python 3.11. Every step was run against a real container, and the cleanup was run too. Docker and Linux were not tried.
+
+**What you need**
+
+- The code is built (section "Build and run" above), so `.venv/bin/kc-axi` exists.
+- Podman is installed. On macOS the Podman machine is running with at least 4 GiB of memory (`podman machine start`).
+- Port 8081 is free. The tutorial uses 8081, so a Keycloak on 8080 is not touched.
+- The shell is bash or zsh.
+
+**What it changes.** One container (`keycloak-tutorial`), one volume (`keycloak-tutorial-data`), and the folder `/tmp/kc-axi-tutorial`. Step 7 removes all three. The folder is outside the repo on purpose: the tool refuses to write secrets or exports inside a git work tree (`unsafe_path`).
+
+### Step 1. Set up the folder and the tool
+
+```bash
+cd keycloak-axi                          # the repo root
+export PATH="$PWD/.venv/bin:$PATH"       # puts kc-axi on the path for this terminal
+export TUT=/tmp/kc-axi-tutorial
+mkdir -p "$TUT/backups" && chmod 700 "$TUT" "$TUT/backups"
+kc-axi --version
+```
+
+Expected: `kc-axi 0.1.0`.
+
+### Step 2. Write the password and the tool configuration
+
+The admin password goes in a file that only you can read. It is never passed on the command line.
+
+```bash
+( umask 077; printf 'tutorial-%s\n' "$(python3 -c 'import secrets; print(secrets.token_hex(8))')" > "$TUT/admin-password" )
+
+cat > "$TUT/config.yaml" <<EOF
+schema_version: 1
+base_url: http://127.0.0.1:8081
+port: 8081
+default_realm: tutorial
+runtime: podman
+container_name: keycloak-tutorial
+image: quay.io/keycloak/keycloak:26.6.4
+volume: keycloak-tutorial-data
+admin_password_file: $TUT/admin-password
+audit_path: $TUT/audit.jsonl
+secrets_dir: $TUT/secrets
+EOF
+
+export KC_AXI_CONFIG="$TUT/config.yaml"
+```
+
+`KC_AXI_CONFIG` tells every later `kc-axi` command where the configuration is, so you do not repeat `--config`.
+
+### Step 3. Start the container
+
+`kc-axi up` is not wired yet (see "Status of the commands"), so this step runs the container with Podman. It is the same command that section 5.3 describes for `up`.
+
+```bash
+export KC_BOOTSTRAP_ADMIN_USERNAME=admin
+export KC_BOOTSTRAP_ADMIN_PASSWORD="$(cat "$TUT/admin-password")"
+export KC_HOSTNAME=127.0.0.1
+
+podman volume create keycloak-tutorial-data
+podman run -d --name keycloak-tutorial -p 127.0.0.1:8081:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME -e KC_BOOTSTRAP_ADMIN_PASSWORD -e KC_HOSTNAME \
+  -v keycloak-tutorial-data:/opt/keycloak/data \
+  quay.io/keycloak/keycloak:26.6.4 start-dev
+```
+
+The first run pulls the image, which can take a few minutes. Wait until the server answers. This loop prints `ready` when it does, and gives up after about three minutes:
+
+```bash
+for i in $(seq 1 90); do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/realms/master)" = 200 ] && { echo ready; break; }
+  sleep 2
+done
+```
+
+**Check it.** The container is listed, and `kc-axi` can log in and list realms:
+
+```bash
+podman ps --filter name=keycloak-tutorial --format '{{.Names}} {{.Status}}'
+kc-axi realms
+```
+
+Expected from `kc-axi realms`:
+
+```
+status: active
+total: 1
+items[1 of 1]{name,enabled}:
+  master,true
+```
+
+### Step 4. Create a realm and two clients from a file
+
+The file declares what Keycloak must contain. `tutorial-api` is a confidential client whose secret the tool generates and keeps in the secrets directory. It never prints the secret.
+
+```bash
+cat > "$TUT/tutorial.config.yaml" <<'EOF'
+schema_version: 1
+kind: config
+owner: tutorial
+realm:
+  name: tutorial
+  enabled: true
+  displayName: "Tutorial"
+clients:
+  - clientId: tutorial-web
+    enabled: true
+    publicClient: true
+    standardFlowEnabled: true
+    pkce: S256
+    redirectUris: ["http://127.0.0.1:3000/*"]
+    webOrigins: ["http://127.0.0.1:3000"]
+  - clientId: tutorial-api
+    enabled: true
+    publicClient: false
+    secret_managed: true
+    serviceAccountsEnabled: true
+EOF
+
+kc-axi plan  --file "$TUT/tutorial.config.yaml"
+kc-axi apply --file "$TUT/tutorial.config.yaml"
+kc-axi apply --file "$TUT/tutorial.config.yaml" --yes
+```
+
+What you see:
+
+- `plan` lists three actions (`create` the realm, `create` both clients) and exits 1 with `status: drift`. Exit 1 is how `plan` says "there is a difference". It is not a failure.
+- `apply` without `--yes` shows the same list with `status: confirm_required` and changes nothing.
+- `apply --yes` prints `status: applied` and `applied: 3`.
+
+**Check it.** A second `plan` finds nothing to do, and the reads show the new objects:
+
+```bash
+kc-axi plan --file "$TUT/tutorial.config.yaml"      # status: no_change, exit 0
+kc-axi realms                                        # master and tutorial
+kc-axi clients --realm tutorial                      # tutorial-api and tutorial-web, managed by "tutorial"
+kc-axi get realm tutorial
+```
+
+Add `--json` to any command for the JSON form.
+
+### Step 5. Back up the realm, break it, restore it
+
+The full export holds the users, their password hashes and the realm signing keys. It stops the container for about 10 seconds and starts it again. The file is written with mode 0600.
+
+```bash
+kc-axi export-realm --realm tutorial --scope full --out "$TUT/backups/tutorial.json" --yes
+```
+
+Expected: `status: written`, with the `users` and `clients` counts. (The count of clients includes the built-in ones, so it is more than 2.)
+
+Now change the display name by mistake:
+
+```bash
+sed 's/displayName: "Tutorial"/displayName: "Changed by mistake"/' "$TUT/tutorial.config.yaml" > "$TUT/changed.config.yaml"
+kc-axi apply --file "$TUT/changed.config.yaml" --yes
+kc-axi get realm tutorial --fields displayName       # displayName: Changed by mistake
+```
+
+Restore from the backup. Without `--yes` the command shows the counts and changes nothing:
+
+```bash
+kc-axi import-realm --realm tutorial --file "$TUT/backups/tutorial.json"
+kc-axi import-realm --realm tutorial --file "$TUT/backups/tutorial.json" --yes
+```
+
+`import-realm --yes` first writes a backup of the live realm into `$TUT/secrets`, then deletes the realm, then loads the file. This takes about 20 seconds.
+
+**Check it.** The display name is back, and the original file again matches the server:
+
+```bash
+kc-axi get realm tutorial --fields displayName       # displayName: Tutorial
+kc-axi plan --file "$TUT/tutorial.config.yaml"       # status: no_change, exit 0
+```
+
+### Step 6. Look at what the tool kept
+
+```bash
+ls -l "$TUT/secrets"        # the client secret file, the lock file, and the backup made by import-realm
+cut -c1-120 "$TUT/audit.jsonl"
+```
+
+The audit file has one `intent` line and one `result` line for each write. It lists field names only, never a value. All files in `secrets` have mode `-rw-------`.
+
+### Step 7. Clean up
+
+This removes the container, the volume, the folder and the shell variables. It does not touch any other container or volume.
+
+```bash
+podman rm -f keycloak-tutorial
+podman volume rm keycloak-tutorial-data
+rm -rf "$TUT"
+unset TUT KC_AXI_CONFIG KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD KC_HOSTNAME
+```
+
+The two `podman` commands print the name they removed (`keycloak-tutorial`, `keycloak-tutorial-data`). That is the expected output.
+
+**Check it.** Each line should show that the tutorial is gone:
+
+```bash
+podman ps -a --filter name=keycloak-tutorial --format '{{.Names}}'     # prints nothing
+podman volume ls --filter name=keycloak-tutorial-data --format '{{.Name}}'   # prints nothing
+ls -d /tmp/kc-axi-tutorial                                              # No such file or directory
+curl -s -o /dev/null -w '%{http_code}\n' --max-time 3 http://127.0.0.1:8081/realms/master   # 000
+```
+
+`rm -rf` deletes the backup too. If you want to keep the realm file, move `tutorial.json` out of `$TUT` before this step, to a folder that is not in a git work tree.
+
+### If something goes wrong
+
+| Symptom | Cause and fix |
+|---------|---------------|
+| `podman run` says the port is in use | Something else uses 8081. Pick another port and change it in `config.yaml` (`base_url` and `port`) and in the `-p` argument |
+| `podman` cannot connect | The Podman machine is stopped. Run `podman machine start` |
+| The container exits during start | It ran out of memory. Give the machine 4 GiB: `podman machine stop`, `podman machine set --memory 4096`, `podman machine start`, then remove the container and repeat step 3 |
+| `error: config_missing` | `KC_AXI_CONFIG` is not set in this terminal. Run the `export` line at the end of step 2 |
+| `error: auth_failed` | The volume was created with another password. Run step 7, then start again from step 2 |
+| `error: unsafe_path` | A path points inside a git work tree. Keep `audit_path`, `secrets_dir` and `--out` under `$TUT` |
+| `error: unsafe_file_mode` | A secret file is readable by others. Run `chmod 600` on the file named in the message |
+| `kc-axi secrets list` says `flag_not_valid` | The `secrets` commands are not wired yet (see "Status of the commands") |
+
+---
+
 ## 1. Purpose
 
 The tool does two jobs:

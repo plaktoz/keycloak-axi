@@ -204,6 +204,12 @@ Nothing in this list is committed. Commit only when the owner asks. Once asked, 
   - Depends on: I20, I21, I22.
   - Status: `[x]` done 2026-11-01. Spec §4.1 `--runtime` row covers the full export and import. §7 recoverability table now lists `import_invalid` (permanent) and `import_partial` (transient); before this task the table lacked 17 registered codes, two of them new; 15 older codes are still missing and are not added here. §8 C85 and C86 record stub-test status, not live. The §4.4 cross-check (`tests/test_output_errors.py`) passes. README.html regenerated.
 
+- [x] **I24. README tutorial.** README section "Tutorial: a throw-away Keycloak in 10 minutes".
+  - Does: copy-and-paste steps for setup, a container named `keycloak-tutorial` on port 8081, `plan` and `apply`, full export and restore, a check after each step, and cleanup with checks. `up` is not wired, so step 3 uses `podman run`.
+  - Status: `[x]` done 2026-11-01.
+  - Verified: the bash blocks were extracted from the README and run in a fresh zsh on macOS, Podman 6.1.4, Keycloak 26.6.4. Output matched. The cleanup left no container, volume or folder, and `keycloak-dev` on 8080 kept running. Not run: Docker, Linux. No code changed, so the test count is unchanged.
+  - Note: the owner removed `README.html` on 2026-11-01. I17 no longer needs to regenerate it.
+
 ## Test and release tasks
 
 - [ ] **I13. Integration fixture.** Starts a throw-away Keycloak 26.6.4 with the tool's own `up`, and removes it after the run.

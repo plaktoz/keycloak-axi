@@ -30,13 +30,14 @@ The output follows the CLI rules in section 4.5. Those rules restate the AXI pri
 - A **secrets directory** with one secrets file per realm. The file holds numbered generations (section 3.5).
 - An **audit file** of writes (section 3.3).
 - Local scope only. A write to a server that is not local needs `--allow-remote` (section 5.4).
+- Full export and import of one realm in one file, for backup and restore (section 5.12).
 
 **Non-goals**
 
 - Authorisation. Keycloak answers who a person is. What that person can do belongs to the consuming application.
 - Production deployment of Keycloak. This covers clustering, an external database, TLS termination and backups. `up` starts a development instance only.
 - Roles, groups, identity brokering and themes. Temporary passwords are in scope (section 5.11).
-- Deleting a realm. Deleting a user. A user is disabled, never deleted.
+- Deleting a realm, except as the replace step of `import-realm` (section 5.12). Deleting a user. A user is disabled, never deleted.
 - Replacing the Keycloak admin console.
 - The sign-in flow of an end-user CLI. The consuming project chooses its own client and flow.
 - A public Python API in v1. Consumers call the command line. Consumers read the secrets file by the format in section 5.8.
@@ -79,7 +80,7 @@ An audit record is one JSON line. The file is set by `audit_path`. Every write c
 
 - `ts` is RFC 3339 in UTC.
 - `actor` is the operating-system user name.
-- `action` is one of `create`, `change`, `adopt`, `remove`, `disable`, `enable`, `secret`, `capture`, `rotate`, `restore`, `prune`, `password`, `up`, `down`, `export`.
+- `action` is one of `create`, `change`, `adopt`, `remove`, `disable`, `enable`, `secret`, `capture`, `rotate`, `restore`, `prune`, `password`, `up`, `down`, `export`, `import`.
 - `fields` lists field names only. No value is written.
 - A `result` record repeats the `id`. It adds `"phase": "result"` and `"outcome": "ok"` or `"error"`. An error result also has the typed code.
 
@@ -284,6 +285,8 @@ Paths given on the command line (`--file`, `--out`) and paths given in `KC_*` en
 | `kc-axi plan --file F` | Show the difference from the server | No | No |
 | `kc-axi apply --file F [--expect H] [--adopt] [--allow-delete] [--allow-reenable] [--allow-remote] [--yes]` | Make the server match the file | Keycloak and local | Yes, when there is at least one action |
 | `kc-axi export-realm --realm R --scope config\|users --out PATH [--owner NAME] [--include-unmanaged] [--capture-secrets] [--yes]` | Write the live state as one desired-state file | Local files, and the secrets file with `--capture-secrets` | Yes, when the file exists |
+| `kc-axi export-realm --realm R --scope full --out PATH [--yes]` | Stop the container, export the whole realm to one file, and start the container again (section 5.12) | Local files, and the container | Yes, when the file exists |
+| `kc-axi import-realm --realm R --file PATH [--yes] [--allow-remote]` | Replace the realm with the contents of one file, after a backup of the live realm (section 5.12) | Keycloak and local | Yes |
 | `kc-axi secrets list [--realm R]` | Generations, states and fingerprints | No | No |
 | `kc-axi secrets capture --realm R --client C [--yes] [--allow-remote]` | Record the live value of one client as a new generation | Local | Yes |
 | `kc-axi secrets rotate --file F [--client C] [--yes] [--allow-remote]` | Write new values and apply them | Keycloak and local | Yes |
@@ -365,6 +368,8 @@ Keys per command (besides `schema_version` and `command`):
 | `plan` | `status` (`no_change`, `drift`), `realm`, `total`, `shown`, `actions` (list of `action`, `kind`, `name`, `detail`), `unmanaged` (list of `kind`, `name`), `password_missing` (list of `username`), `profile_incomplete` (list of `username`, `missing`), `plan_hash` |
 | `apply` | `status` (`already`, `applied`), `applied` (count), `created` (list of `kind`, `name`, `id`), `plan_hash` |
 | `export-realm` | `status` (`written`), `path`, `kind`, `skipped` (count of skipped clients), `unmanaged_included` (count) |
+| `export-realm --scope full` | `status` (`written`), `path`, `kind` (`full`), `realm`, `users` (count), `clients` (count) |
+| `import-realm` | `status` (`replaced`), `realm`, `users` (count), `clients` (count), `backup` (path of the backup written before the replace) |
 | `secrets list` | `status`, `realm`, `active`, `generations` (list of `generation`, `state`, `created_at`, and `clients` as `name` to `fingerprint`) |
 | `secrets capture`, `rotate`, `restore`, `prune` | `status` (`already`, `done`), `generation`, `applied` (count), `pruned` (count) |
 | `reset-password` | `status` (`already`, `done`), `username`, `id` |
@@ -388,7 +393,7 @@ The tool follows the library rule in `libs/README.md` in agentzero-v2-dev, secti
 |------|---------|-------------|
 | 0 | Success. Includes an empty result, `already`, `no_change`, and `status` for an unreachable server | none |
 | 1 | The command failed, or a judging command found a difference | See the table below |
-| 2 | Usage or configuration | `usage`, `flag_not_valid`, `config_missing`, `config_invalid`, `unknown_field`, `duplicate_key`, `schema_unsupported`, `realm_required`, `realm_mismatch`, `owner_required`, `admin_realm_refused`, `builtin_client`, `credential_missing`, `insecure_url`, `image_invalid`, `volume_invalid`, `audit_required`, `unsafe_path`, `unsafe_file_mode`, `secrets_server_mismatch`, `secret_managed_public`, `id_invalid` |
+| 2 | Usage or configuration | `usage`, `flag_not_valid`, `config_missing`, `config_invalid`, `unknown_field`, `duplicate_key`, `schema_unsupported`, `realm_required`, `realm_mismatch`, `owner_required`, `admin_realm_refused`, `builtin_client`, `credential_missing`, `insecure_url`, `image_invalid`, `volume_invalid`, `audit_required`, `unsafe_path`, `unsafe_file_mode`, `secrets_server_mismatch`, `secret_managed_public`, `id_invalid`, `import_invalid` |
 
 Exit 1 codes:
 
@@ -430,6 +435,7 @@ Exit 1 codes:
 | `file_failed` | A local file cannot be written, for example on a full disk. The message names the path |
 | `secret_in_export` | An export contains a secret value. The output file is deleted |
 | `apply_partial` | A write failed after at least one change. `applied`, `pending` and `cause` give the counts and the failing code |
+| `import_partial` | The realm was deleted and the new file did not load. The error gives `backup`, the path of the backup. Run `import-realm` with that file to restore the realm |
 
 **Partial runs.** `apply` stops at the first failure. Its exit is 1 and its code is `apply_partial`. The error object gives `applied`, `pending` and `cause`. Keycloak has no transactions. Running `apply` again finishes the job. A run never exits 0 while an action is pending.
 
@@ -719,7 +725,7 @@ The first release targets Linux with Podman and macOS with Podman (section 11). 
 8. With `--capture-secrets`, record each confidential client's current secret as a new generation in the secrets file. Set `secret_managed: true` for that client in the written config file. This writes the secrets file, and it needs `--yes`.
 9. `--scope users` writes the users file to `--out`. The output path must lie outside any git work tree (`unsafe_path`). The file gets owner-only permissions on Linux and macOS.
 
-Export a whole realm with two calls, one for each scope, and two output paths.
+Export a whole realm with two calls, one for each scope, and two output paths. `--scope full` writes the whole realm in one file instead (section 5.12).
 
 ### 5.8 Secrets
 
@@ -838,6 +844,35 @@ kc-axi does not change the admin password. The operator does this by hand:
 Live check, 2026-10-27: `reset-password` with `temporary: true` sets the required action `UPDATE_PASSWORD`.
 
 A password set with `partialImport` on an existing user is **not tested** (section 11). The owner decided to test that call first. `reset-password` is the repair path until the test passes.
+
+### 5.12 Full export and import of one realm
+
+A full file holds one realm in one JSON file. It has the realm settings, the clients, the roles, the groups, the users with their password hashes, and the realm signing keys. It is a backup and restore format. It is not a desired-state file, so the rules of section 3.4 do not apply to it. The admin password must still not appear in it (section 5.7, step 7). The file is Keycloak's own realm JSON, so `kc.sh import` also reads it.
+
+Both commands follow the audit order of section 3.3: the `intent` record is written before the first change, and the `result` record after the last one.
+
+**Export.** `export-realm --realm R --scope full --out PATH [--yes]`
+
+1. Refuse the `admin_realm` (exit 2, `admin_realm_refused`). Refuse an `--out` inside a git work tree (exit 2, `unsafe_path`). Check `audit_path` (exit 2, `audit_required`). An existing file without `--yes` exits 1, `confirm_required`. None of these checks changes anything.
+2. Take the lock. Run the audit preflight. The container must exist, otherwise the command exits 1, `not_found`. Run `up` first.
+3. Write the `intent` record, with the action `export`, before the container stops.
+4. Stop the container, if it runs. Run the image of `image` once, on the data volume of section 5.3.1, with `export --realm R --users realm_file --dir <directory>`. The directory is new and owner-only, under `secrets_dir`. The export runs offline, because the admin REST API never returns password hashes. A failed export exits 1, `runtime_failed`.
+5. Start the container and wait until it is ready, as in `up`. This runs even when step 4 fails. A start that fails exits with its own error, and nothing is written to `--out`.
+6. Check the exported file: it must be JSON, and its `realm` must equal R. The admin password must not appear in it. A match exits 1, `secret_in_export`, and nothing is written to `--out`. Otherwise write the file to `--out` with owner-only permissions on Linux and macOS, then delete the directory of step 4.
+7. Write the `result` record and print `status: written`.
+
+**Import.** `import-realm --realm R --file PATH [--yes] [--allow-remote]`
+
+1. Refuse the `admin_realm` (exit 2, `admin_realm_refused`). Check the file: owner-only mode (exit 2, `unsafe_file_mode`); parsed as JSON (exit 2, `import_invalid`); `realm` equal to R (exit 2, `realm_mismatch`); `users` and `clients` present as lists (exit 2, `import_invalid`). Check `audit_path` (exit 2, `audit_required`). Apply the local-scope guard (exit 1, `allow_remote_required`).
+2. Without `--yes`, the command exits 1, `confirm_required`, and prints the counts of the file and of the live realm. Nothing changes.
+3. Take the lock. Run the audit preflight. When the realm exists, the container must exist, because the backup of step 5 needs it (exit 1, `not_found`).
+4. Write the `intent` record, with the action `import`, before any change.
+5. When the realm exists, back it up: steps 4 to 6 of the export, with the file written to `secrets_dir` instead of `--out`. The backup is named with R and the UTC time, and is owner-only. A realm that does not exist has no backup. A failed backup exits with its error before the realm is changed.
+6. When the realm exists, call `DELETE /admin/realms/{R}`. Then call `POST /admin/realms` with the file. Keycloak restores the users with their password hashes, the clients and the realm signing keys. Sessions and tokens of the old realm end. A failed `DELETE` exits with its own error, and the realm is not replaced.
+7. When the `POST` fails after the `DELETE`, and a backup exists, send the backup through the same `POST`. The command then exits 1 with `import_partial`. The error gives `backup` (the path) and `cause` (the code of the failed `POST`). Keycloak has no transactions. When the restore `POST` also fails, the backup file is the only copy of the realm. Without a backup, the `POST` error exits as it is.
+8. Write the `result` record and print `status: replaced`. When a step fails, the `intent` record gets the outcome `error` and the typed code.
+
+**Security note.** The full file holds the realm signing private keys and the password hashes, so it is as sensitive as the secrets file. Keep it owner-only and outside git. Section 11, item 30, gives the evidence. The test status of each step is in section 8.
 
 ## 6. Configuration
 
@@ -1073,6 +1108,15 @@ The numbers of criteria 1 to 57 are the same as in draft v0.3. Criteria 58 and l
 81. `plan` lists a declared user without `email`, `firstName` or `lastName` under `profile_incomplete`, and names the missing fields. The list does not change `total`, `plan_hash` or the exit code. `apply` still creates the user. Status: `plan` half passed (task I6, 2026-10-27, section 11, item 38). The `apply` half needs I7.
 82. Plain `down` with `runtime: auto` and neither program installed exits 0, `already_absent`. Plain `down` with `--runtime docker` or `--runtime podman` and that program missing exits 1, `runtime_missing`. Status: passed with stub runtimes on 2026-10-27 (task I4).
 83. `down --purge --yes` with both runtimes installed and neither holding the container exits 1, `runtime_ambiguous`. No volume is removed. Status: passed with stub runtimes on 2026-10-27 (task I4).
+84. `export-realm --realm R --scope full --out PATH --yes` writes one JSON file with the realm, its clients, roles, groups, users and password hashes. The file's `realm` equals R, and the admin password does not appear in it. Status: the same steps passed by hand on 2026-11-01 (`kc.sh export` on Keycloak 26.6.4). Not run through the tool.
+85. The full export refuses an `--out` inside a git work tree with `unsafe_path`, before the container stops. Status: not run.
+86. When the runtime export fails, the full export starts the container again and exits 1, `runtime_failed`. Status: not run.
+87. `import-realm` replaces the realm. After it, the users and clients of the file exist, a user absent from the file is gone, and each user signs in with the password it had before the export. Status: passed by hand on 2026-11-01 (`DELETE` then `POST /admin/realms` on 26.6.4). Not run through the tool.
+88. `import-realm` with a file whose `realm` differs from `--realm` exits 2 with `realm_mismatch`. Nothing changes. Status: not run.
+89. `import-realm` writes the backup before the delete. A failed backup exits 1 and the realm is unchanged. Status: not run.
+90. When the second call of the replace fails, `import-realm` loads the backup and exits 1 with `import_partial`. Status: not run.
+91. After a replace, the realm keeps the signing keys of the file. The signing certificate in the file is the one the restored server publishes at its JWKS endpoint. Status: passed by hand on 2026-11-01.
+92. A confidential client's secret in the file is the same after the replace. Status: not run. The test realm has no confidential client of its own.
 
 ## 9. Known Consumers
 
@@ -1150,11 +1194,12 @@ The owner answered each decision below. The task list `docs/tasks-kc-axi-podman-
 22. **Remote guard.** Applies to every write to Keycloak (section 5.4).
 23. **Missing configuration.** `config_missing`, exit 2, for any value that no flag or variable supplies.
 24. **Owner conflict.** A declared client with another owner's marker exits 1, `owner_conflict`, before any write.
-25. **Lock.** Taken before the first read of `plan`. It covers `apply`, `disable-*`, `up`, `down`, `reset-password`, the `secrets` writes and `export-realm --capture-secrets`.
+25. **Lock.** Taken before the first read of `plan`. It covers `apply`, `disable-*`, `up`, `down`, `reset-password`, the `secrets` writes, `export-realm --capture-secrets`, and the full export and `import-realm` (section 5.12).
 26. **Service principal key.** `clientId`, which equals the token `azp` (section 9).
 27. **Crash window.** The owner accepted the window after a Keycloak secret change. Consumers must not start while a generation is `pending`. The next `apply` finishes the job (section 5.8).
 28. **Sign-in flow.** Not a decision of this library. The consuming project decides its own sign-in flow.
 29. **Memory.** The engine needs 4 GiB. When a container is killed for memory, `up` prints a suggested `java_opts` value. No default heap cap is set (section 5.3).
+30. **Full realm file (2026-11-01).** The owner asked for one file that holds a whole realm, with users' password hashes, so the realm can be restored with its passwords. The file holds the realm signing private keys and the password hashes. It is JSON, owner-only, and outside git. The export runs offline, because the admin REST API does not return password hashes: on Keycloak 26.6.4 the users list has no `credentials`. The replace through the REST API was tested by hand on 2026-11-01. Client secrets of confidential clients in the file are not tested, because the test realm has no confidential client of its own. Section 5.12 gives the rules.
 
 **Defaults applied without a separate owner answer.** Each default follows from an owner answer or from the rules above. The owner can narrow any of them.
 

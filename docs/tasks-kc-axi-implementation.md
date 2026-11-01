@@ -178,6 +178,32 @@ Nothing in this list is committed. Commit only when the owner asks. Once asked, 
   - Depends on: I2c, I7, I8. Build the hook points together with those tasks.
   - Status: not started.
 
+- [ ] **I19. Offline export helper in the runtime.** Spec §5.12 (export steps 4 and 5), §5.3.1.
+  - Does: a stop helper for the container. A run of the image on the data volume, with `export --realm R --users realm_file --dir <dir>`, into a new owner-only directory under `secrets_dir`. The container starts again in a `finally`, also when the export fails. The check of the exported file and the removal of its directory are the callers' work (I20, I21). Refuse `--realm` values that are not a plain realm name, before any argument reaches the runtime.
+  - Acceptance: C86 (restart on a failed export). Runtime stub tests. A live check of the export with the real image, on the throw-away server, is in I22.
+  - Depends on: I4, I8.
+  - Status: not started.
+- [ ] **I20. `export-realm --scope full`.** Spec §5.12 (export), §4.1, §4.3, §5.7.
+  - Does: `--scope full --out PATH`. Refuses `admin_realm`, an `--out` inside a git work tree (`unsafe_path`), a missing audit path, and an existing `--out` without `--yes`. Takes the lock, writes the `intent` record with action `export`, calls I19, checks the file (JSON, `realm` equals R, no admin password in it), writes it owner-only and removes the directory, then writes the `result` record. Output `status: written`. Any failure leaves no file at `--out`.
+  - Acceptance: C84, C85, C86, and the export half of C69. The `scope` values `config` and `users` keep their I10 behaviour.
+  - Depends on: I10, I19.
+  - Status: not started.
+- [ ] **I21. `import-realm`.** Spec §5.12 (import), §4.1, §4.3, §5.7.
+  - Does: `--realm R --file PATH [--yes] [--allow-remote]`. Checks the file before any change: owner-only mode (`unsafe_file_mode`), JSON (`import_invalid`), `realm` equals R (`realm_mismatch`), `users` and `clients` are lists (`import_invalid`). Local-scope guard (`allow_remote_required`). Without `--yes`, prints the counts of the file and of the live realm and exits 1 `confirm_required`. When the realm exists: backup through I19 and I20 steps (into `secrets_dir`, before any delete), `DELETE /admin/realms/{R}`, `POST /admin/realms` with the file. If the `POST` fails after the `DELETE`, sends the backup through the same `POST` and exits 1 `import_partial` with `backup` and `cause`. Output `status: replaced`.
+  - Acceptance: C87, C88, C89, C90, C91. Rows for the codes `import_invalid` and `import_partial` in `errors.py`, and the `import` action in `audit.py`.
+  - Depends on: I3, I19, I20, and the codes of I2a and the actions of I2c.
+  - Status: not started.
+- [ ] **I22. Live check of the full file.** Spec §5.12, §8 criteria 84, 87, 91 and 92.
+  - Does: runs export and import against a throw-away Keycloak on port 8081, with a realm that has users with passwords, a signing key and a confidential client. Records the result of C92, which has not run yet. Removes the throw-away server and its volume after the run. Never touches the `keycloak-dev` data volume. Marked as needing a container runtime, so it skips without one.
+  - Acceptance: C84, C87, C88, C89, C90, C91, C92 run through the tool. Each test result is written into the spec §8 status fields and the section 11 item 30 evidence.
+  - Depends on: I13, I20, I21.
+  - Status: not started.
+- [ ] **I23. Docs sync for the full file.** Spec §4.1, §5.7, §5.12, §8, §11 item 30.
+  - Does: the package README (exit codes, the `import_invalid` and `import_partial` rows, the step names of I19), the spec status fields, and `python3 -I scripts/md2html.py README.md README.html`.
+  - Acceptance: the code cross-check test of `errors.py` against spec §7 passes. The HTML twin is regenerated from the final spec.
+  - Depends on: I20, I21, I22.
+  - Status: not started.
+
 ## Test and release tasks
 
 - [ ] **I13. Integration fixture.** Starts a throw-away Keycloak 26.6.4 with the tool's own `up`, and removes it after the run.
@@ -231,5 +257,6 @@ Task I11 note: the `reset-password` endpoint was not retested on 2026-10-27. Spe
 4. I5, I6.
 5. I7, I10, I11.
 6. I9, I12.
-7. I13, then I14, I15, I16, I17.
-8. I18 when the hosts exist.
+7. I19, then I20, then I21 (full file, §5.12).
+8. I13, then I22 (live check of the full file), I14, I15, I16, I17, I23.
+9. I18 when the hosts exist.

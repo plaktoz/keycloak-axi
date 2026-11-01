@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
 
-from . import __version__, apply as applying, plan as planning, reads
+from . import __version__, apply as applying, fullrealm, plan as planning, reads
 from .config import Settings, load_settings, resolve_config_path
 from .credentials import require_admin_password
 from .audit import require_audit_path
@@ -28,7 +28,7 @@ DESCRIPTION = "Run a local Keycloak and manage one realm as desired state, throu
 # Commands of spec section 4.2. Their own flags are added by their tasks.
 COMMANDS = (
     "up", "down", "status", "realms", "clients", "users", "get", "plan", "apply",
-    "export-realm", "secrets", "reset-password", "disable-user", "disable-client",
+    "export-realm", "import-realm", "secrets", "reset-password", "disable-user", "disable-client",
 )
 
 
@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument("key", metavar="KEY", help="The name, the clientId or the username")
         if name == "plan":
             sub.add_argument("--file", metavar="F", required=True, help="Desired-state file (config or users)")
+        if name == "export-realm":
+            sub.add_argument("--scope", choices=("config", "users", "full"), required=True, help="What to write")
+            sub.add_argument("--out", metavar="PATH", required=True, help="Output file")
+        if name == "import-realm":
+            sub.add_argument("--file", metavar="F", required=True, help="Full realm file written by export-realm --scope full")
         if name == "apply":
             sub.add_argument("--file", metavar="F", required=True, help="Desired-state file (config or users)")
             sub.add_argument("--expect", metavar="H", help="Refuse unless plan_hash equals H")
@@ -168,6 +173,16 @@ def run_apply(args: argparse.Namespace, settings: Settings, err: TextIO) -> appl
     )
 
 
+def run_export_full(args: argparse.Namespace, settings: Settings) -> dict:
+    """`export-realm --scope full --out PATH` (spec 5.12). The admin password is required: the file is checked for it."""
+    realm = reads.require_realm(settings.realm)
+    password = require_admin_password(settings.admin_password_file)
+    out = Path(args.out).expanduser()
+    if not out.is_absolute():
+        out = Path.cwd() / out
+    return fullrealm.export_full(settings, realm, out, password, yes=args.yes)
+
+
 def no_argument_view(config_path: Path, out: TextIO) -> None:
     """Spec 4.5 rule 7: `bin`, `description`, the configuration path and whether it exists. No network."""
     emit(
@@ -217,6 +232,12 @@ def main(argv: Sequence[str] | None = None, out: TextIO | None = None, err: Text
             applied = run_apply(args, settings, err)
             emit(result_payload(command, applied.body, as_json=as_json), as_json=as_json, stream=out, max_cell_chars=max_cell_chars)
             return applied.exit_code
+        if command == "export-realm" and args.scope == "full":
+            settings = load_settings(config_flag=args.config, realm_flag=args.realm, runtime_flag=args.runtime)
+            max_cell_chars = settings.max_cell_chars
+            body = run_export_full(args, settings)
+            emit(result_payload(command, body, as_json=as_json), as_json=as_json, stream=out, max_cell_chars=max_cell_chars)
+            return 0
         raise KcAxiError("usage", f"{command} is not built yet", help=(f"{BIN} --help",))
     except KcAxiError as e:
         emit(error_payload(e, command or BIN, as_json=as_json), as_json=as_json, stream=out, max_cell_chars=max_cell_chars)

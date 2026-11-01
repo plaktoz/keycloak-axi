@@ -631,10 +631,14 @@ def export_realm_offline(
     realm: str,
     workdir: Path,
     *,
+    before_stop: Callable[[], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
 ) -> Path:
     """Spec 5.12, export steps 2 to 5. Returns the path of the realm file inside `workdir`.
+
+    `before_stop` runs after every check and before the container stops. The caller writes its audit `intent`
+    record there (step 3). When it raises, nothing has changed and the container is not touched.
 
     `workdir` is a new, owner-only directory that the caller made and that the caller removes (step 6). The
     container starts again and becomes ready in a `finally`, also when the export fails (criterion 86). A failed
@@ -659,6 +663,8 @@ def export_realm_offline(
     if target.state != "running" and target.state not in STOPPED_STATES:
         raise KcAxiError("container_state", f"container {settings.container_name} is in state {target.state}", help=("kc-axi status",), state=target.state)
     runtime = target.runtime
+    if before_stop is not None:
+        before_stop()
 
     exported: Path | None = None
     failure: KcAxiError | None = None

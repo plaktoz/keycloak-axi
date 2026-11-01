@@ -178,6 +178,38 @@ Nothing in this list is committed. Commit only when the owner asks. Once asked, 
   - Depends on: I2c, I7, I8. Build the hook points together with those tasks.
   - Status: not started.
 
+- [x] **I19. Offline export helper in the runtime.** Spec §5.12 (export steps 4 and 5), §5.3.1.
+  - Does: a stop helper for the container. A run of the image on the data volume, with `export --realm R --users realm_file --dir <dir>`, into a new owner-only directory under `secrets_dir`. The container starts again in a `finally`, also when the export fails. The check of the exported file and the removal of its directory are the callers' work (I20, I21). Refuse `--realm` values that are not a plain realm name, before any argument reaches the runtime.
+  - Acceptance: C86 (restart on a failed export). Runtime stub tests. A live check of the export with the real image, on the throw-away server, is in I22.
+  - Depends on: I4, I8.
+  - Status: `[x]` done 2026-11-01. `runtime.export_realm_offline` stops the container, runs the image once as `<container>-export` on the data volume, copies `R-realm.json` out with `cp` (no host path is mounted, so no uid mapping problem on rootless Podman), and always removes the one-off container and starts the server again. A failed export is reported before a failed restart. A realm name that is not plain exits 2 `config_invalid` before any runtime call. Also registered `import_invalid`, `import_partial` and the `import` audit action, which the C55 registry test needed once the spec listed them. Spec §5.12 step 4 now describes the `cp` design. Verified: 11 new stub tests in `tests/test_export_offline.py`; full suite 633 passed, 4 skipped. Not run against a real runtime yet (I22).
+- [x] **I20. `export-realm --scope full`.** Spec §5.12 (export), §4.1, §4.3, §5.7.
+  - Does: `--scope full --out PATH`. Refuses `admin_realm`, an `--out` inside a git work tree (`unsafe_path`), a missing audit path, and an existing `--out` without `--yes`. Takes the lock, writes the `intent` record with action `export`, calls I19, checks the file (JSON, `realm` equals R, no admin password in it), writes it owner-only and removes the directory, then writes the `result` record. Output `status: written`. Any failure leaves no file at `--out`.
+  - Acceptance: C84, C85, C86, and the export half of C69. The `scope` values `config` and `users` keep their I10 behaviour.
+  - Depends on: I10, I19.
+  - Status: `[x]` done 2026-11-01 for `--scope full` only. New `src/kc_axi/fullrealm.py` (`export_full`, `write_private`, `runtime_settings`), CLI flags `--scope` and `--out`, and `import-realm --file` parse. `--scope config|users` still exits 2 `usage` ("not built yet") until I10. The intent record is written through a `before_stop` hook, after the `not_found` check and before the container stops. The output file is written by temp file and rename, 0600, so a failure leaves nothing at `--out`. Verified: 8 tests in `tests/test_export_full.py`; mutation check (leak check removed, git check removed) makes the C84 leak test and the C85 test fail; full suite 641 passed, 4 skipped. Not run against a real runtime yet (I22).
+- [x] **I21. `import-realm`.** Spec §5.12 (import), §4.1, §4.3, §5.7.
+  - Does: `--realm R --file PATH [--yes] [--allow-remote]`. Checks the file before any change: owner-only mode (`unsafe_file_mode`), JSON (`import_invalid`), `realm` equals R (`realm_mismatch`), `users` and `clients` are lists (`import_invalid`). Local-scope guard (`allow_remote_required`). Without `--yes`, prints the counts of the file and of the live realm and exits 1 `confirm_required`. When the realm exists: backup through I19 and I20 steps (into `secrets_dir`, before any delete), `DELETE /admin/realms/{R}`, `POST /admin/realms` with the file. If the `POST` fails after the `DELETE`, sends the backup through the same `POST` and exits 1 `import_partial` with `backup` and `cause`. Output `status: replaced`.
+  - Acceptance: C87, C88, C89, C90, C91. Rows for the codes `import_invalid` and `import_partial` in `errors.py`, and the `import` action in `audit.py`.
+  - Depends on: I3, I19, I20, and the codes of I2a and the actions of I2c.
+  - Status: `[x]` done 2026-11-01. `fullrealm.import_full` and `preflight_import`, CLI `import-realm --file`. All file, audit-path, admin-realm and local-scope checks run before the first request (exit 2 for the file). Without `--yes` it exits 1 `confirm_required` with the file and live counts. With a live realm: backup through `export_realm_offline` (intent record written before the stop), `DELETE`, `POST`; a `POST` failure sends the backup and exits 1 `import_partial` with `backup`, `cause` and `restored`. A realm that does not exist is created with no backup and no container stop. Verified: 15 tests in `tests/test_import_full.py` against a stateful fake of the two realm calls; mutation checks (delete before backup, no restore POST) make the C89 and C90 tests fail. Not verified: the real `DELETE` and `POST` on Keycloak (I22), and `restored: true` against a real server.
+- [x] **I22. Live check of the full file.** Spec §5.12, §8 criteria 84, 87, 91 and 92.
+  - Does: runs export and import against a throw-away Keycloak on port 8081, with a realm that has users with passwords, a signing key and a confidential client. Records the result of C92, which has not run yet. Removes the throw-away server and its volume after the run. Never touches the `keycloak-dev` data volume. Marked as needing a container runtime, so it skips without one.
+  - Acceptance: C84, C87, C88, C89, C90, C91, C92 run through the tool. Each test result is written into the spec §8 status fields and the section 11 item 30 evidence.
+  - Depends on: I13, I20, I21.
+  - Status: `[x]` done 2026-11-01. Run on a throw-away server on port 8082 (container `kc-axi-i22`, volume `kc-axi-i22-data`); `up` is not wired yet, so podman started it. C84, C87, C88, C89, C90, C91 (key ids) and C92 passed through the tool. The run found a defect: an unwritable `secrets_dir` ended the backup step in a traceback. Fixed in `fullrealm._take_backup` (exit 1 `file_failed`) with a test whose mutation check fails without the fix. C85 and C86 were not run live. The port is 8082, not 8081 as planned, because `keycloak-restore` holds 8081.
+- [x] **I23. Docs sync for the full file.** Spec §4.1, §5.7, §5.12, §8, §11 item 30.
+  - Does: the package README (exit codes, the `import_invalid` and `import_partial` rows, the step names of I19), the spec status fields, and `python3 -I scripts/md2html.py README.md README.html`.
+  - Acceptance: the code cross-check test of `errors.py` against spec §7 passes. The HTML twin is regenerated from the final spec.
+  - Depends on: I20, I21, I22.
+  - Status: `[x]` done 2026-11-01. Spec §4.1 `--runtime` row covers the full export and import. §7 recoverability table now lists `import_invalid` (permanent) and `import_partial` (transient); before this task the table lacked 17 registered codes, two of them new; 15 older codes are still missing and are not added here. §8 C85 and C86 record stub-test status, not live. The §4.4 cross-check (`tests/test_output_errors.py`) passes. README.html regenerated.
+
+- [x] **I24. README tutorial.** README section "Tutorial: a throw-away Keycloak in 10 minutes".
+  - Does: copy-and-paste steps for setup, a container named `keycloak-tutorial` on port 8081, `plan` and `apply`, full export and restore, a check after each step, and cleanup with checks. `up` is not wired, so step 3 uses `podman run`.
+  - Status: `[x]` done 2026-11-01.
+  - Verified: the bash blocks were extracted from the README and run in a fresh zsh on macOS, Podman 6.1.4, Keycloak 26.6.4. Output matched. The cleanup left no container, volume or folder, and `keycloak-dev` on 8080 kept running. Not run: Docker, Linux. No code changed, so the test count is unchanged.
+  - Note: the owner removed `README.html` on 2026-11-01. I17 no longer needs to regenerate it.
+
 ## Test and release tasks
 
 - [ ] **I13. Integration fixture.** Starts a throw-away Keycloak 26.6.4 with the tool's own `up`, and removes it after the run.
@@ -231,5 +263,6 @@ Task I11 note: the `reset-password` endpoint was not retested on 2026-10-27. Spe
 4. I5, I6.
 5. I7, I10, I11.
 6. I9, I12.
-7. I13, then I14, I15, I16, I17.
-8. I18 when the hosts exist.
+7. I19, then I20, then I21 (full file, §5.12).
+8. I13, then I22 (live check of the full file), I14, I15, I16, I17, I23.
+9. I18 when the hosts exist.

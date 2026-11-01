@@ -30,7 +30,7 @@ SCHEMA_VERSION = 1
 # The action names of spec section 3.3.
 ACTIONS = frozenset({
     "create", "change", "adopt", "remove", "disable", "enable", "secret", "capture", "rotate", "restore",
-    "prune", "password", "up", "down", "export",
+    "prune", "password", "up", "down", "export", "import",
 })
 
 

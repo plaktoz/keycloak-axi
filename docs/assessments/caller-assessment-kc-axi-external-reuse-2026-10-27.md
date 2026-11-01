@@ -1,6 +1,6 @@
 # Caller assessment: kc-axi, external reuse
 
-Date: 2026-10-27 · Spec assessed: [libs/kc-axi/README.md](../../libs/kc-axi/README.md) (Draft v0.2) · Read with: [libs/README.md](../../libs/README.md)
+Date: 2026-10-27 · Spec assessed: [README.md](../../README.md) (Draft v0.2) · Read with: `libs/README.md` in agentzero-v2-dev
 Perspective: an engineer at an unrelated company, no knowledge of UMAS, who wants a local Keycloak managed as desired state from their own repo and CI, driven by a coding agent.
 
 Method: the spec was read in full and checked against itself, against libs/README.md, and against its own section 11 facts. Section 9 was used only to identify UMAS-specific content. No UMAS requirement was treated as a requirement. Nothing was run; no live Keycloak was contacted.

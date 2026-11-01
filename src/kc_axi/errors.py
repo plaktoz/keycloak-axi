@@ -12,7 +12,7 @@ _USAGE_CODES = (
     "schema_unsupported", "realm_required", "realm_mismatch", "owner_required", "admin_realm_refused",
     "builtin_client", "credential_missing", "insecure_url", "image_invalid", "volume_invalid",
     "audit_required", "unsafe_path", "unsafe_file_mode", "secrets_server_mismatch",
-    "secret_managed_public", "id_invalid",
+    "secret_managed_public", "id_invalid", "import_invalid",
 )
 
 # Codes that exit 1: a failed command or a judging result (spec section 4.4, exit 1 table).
@@ -24,7 +24,7 @@ _FAILURE_CODES = (
     "runtime_ambiguous", "container_state", "container_exited", "port_in_use", "keycloak_unreachable",
     "keycloak_timeout", "auth_failed", "keycloak_rejected", "id_conflict", "email_duplicate",
     "not_found", "realm_absent", "secrets_unreadable", "audit_failed", "audit_incomplete", "locked",
-    "file_failed", "secret_in_export", "apply_partial",
+    "file_failed", "secret_in_export", "apply_partial", "import_partial",
 )
 
 # Typed code -> exit code.

@@ -53,9 +53,12 @@ kc-axi --config ./config.yaml plan  --file my-realm.config.yaml
 kc-axi --config ./config.yaml apply --file my-realm.config.yaml --yes
 # Whole realm in one file, with users' password hashes and signing keys (section 5.12).
 # The container stops for about 10 seconds. --out must lie outside any git work tree.
-kc-axi --config ./config.yaml --realm my-realm export-realm --scope full --out ~/keycloak-exports/my-realm.json --yes</code></pre>
+kc-axi --config ./config.yaml --realm my-realm export-realm --scope full --out ~/keycloak-exports/my-realm.json --yes
+# Replace the realm with that file. Without --yes it prints the counts and changes nothing.
+# It backs the live realm up into secrets_dir first, deletes it, then loads the file.
+kc-axi --config ./config.yaml --realm my-realm import-realm --file ~/keycloak-exports/my-realm.json --yes</code></pre>
 <p>The full file holds password hashes and realm signing keys. Keep it owner-only and out of git. The tool writes it with mode 0600.</p>
-<p><strong>Status of the commands (2026-11-01).</strong> Wired in the CLI: <code>realms</code>, <code>clients</code>, <code>users</code>, <code>get</code>, <code>plan</code>, <code>apply</code> (config file only), <code>export-realm --scope full</code>. Not wired yet, so they exit 2 <code>usage</code> ("not built yet"): <code>up</code>, <code>down</code>, <code>status</code>, <code>import-realm</code>, <code>export-realm --scope config|users</code>, <code>secrets</code>, <code>reset-password</code>, <code>disable-user</code>, <code>disable-client</code>. <code>docs/tasks-kc-axi-implementation.md</code> lists the tasks and their state.</p>
+<p><strong>Status of the commands (2026-11-01).</strong> Wired in the CLI: <code>realms</code>, <code>clients</code>, <code>users</code>, <code>get</code>, <code>plan</code>, <code>apply</code> (config file only), <code>export-realm --scope full</code>, <code>import-realm</code>. Not wired yet, so they exit 2 <code>usage</code> ("not built yet"): <code>up</code>, <code>down</code>, <code>status</code>, <code>export-realm --scope config|users</code>, <code>secrets</code>, <code>reset-password</code>, <code>disable-user</code>, <code>disable-client</code>. <code>docs/tasks-kc-axi-implementation.md</code> lists the tasks and their state.</p>
 <hr>
 <h2 id="1-purpose">1. Purpose</h2>
 <p>The tool does two jobs:</p>

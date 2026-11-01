@@ -52,11 +52,14 @@ kc-axi --config ./config.yaml apply --file my-realm.config.yaml --yes
 # Whole realm in one file, with users' password hashes and signing keys (section 5.12).
 # The container stops for about 10 seconds. --out must lie outside any git work tree.
 kc-axi --config ./config.yaml --realm my-realm export-realm --scope full --out ~/keycloak-exports/my-realm.json --yes
+# Replace the realm with that file. Without --yes it prints the counts and changes nothing.
+# It backs the live realm up into secrets_dir first, deletes it, then loads the file.
+kc-axi --config ./config.yaml --realm my-realm import-realm --file ~/keycloak-exports/my-realm.json --yes
 ```
 
 The full file holds password hashes and realm signing keys. Keep it owner-only and out of git. The tool writes it with mode 0600.
 
-**Status of the commands (2026-11-01).** Wired in the CLI: `realms`, `clients`, `users`, `get`, `plan`, `apply` (config file only), `export-realm --scope full`. Not wired yet, so they exit 2 `usage` ("not built yet"): `up`, `down`, `status`, `import-realm`, `export-realm --scope config|users`, `secrets`, `reset-password`, `disable-user`, `disable-client`. `docs/tasks-kc-axi-implementation.md` lists the tasks and their state.
+**Status of the commands (2026-11-01).** Wired in the CLI: `realms`, `clients`, `users`, `get`, `plan`, `apply` (config file only), `export-realm --scope full`, `import-realm`. Not wired yet, so they exit 2 `usage` ("not built yet"): `up`, `down`, `status`, `export-realm --scope config|users`, `secrets`, `reset-password`, `disable-user`, `disable-client`. `docs/tasks-kc-axi-implementation.md` lists the tasks and their state.
 
 ---
 

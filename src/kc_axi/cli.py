@@ -183,6 +183,19 @@ def run_export_full(args: argparse.Namespace, settings: Settings) -> dict:
     return fullrealm.export_full(settings, realm, out, password, yes=args.yes)
 
 
+def run_import(args: argparse.Namespace, settings: Settings, err: TextIO) -> dict:
+    """`import-realm --file F` (spec 5.12). The file is checked before the first request."""
+    realm = reads.require_realm(settings.realm)
+    path = Path(args.file).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    fullrealm.preflight_import(settings, realm, path, allow_remote=args.allow_remote)  # exit 2 before any login
+    password = require_admin_password(settings.admin_password_file)
+    client = connect(settings, allow_remote=args.allow_remote)
+    warn_version(client, err)
+    return fullrealm.import_full(settings, client, realm, path, password, yes=args.yes, allow_remote=args.allow_remote)
+
+
 def no_argument_view(config_path: Path, out: TextIO) -> None:
     """Spec 4.5 rule 7: `bin`, `description`, the configuration path and whether it exists. No network."""
     emit(
@@ -232,6 +245,12 @@ def main(argv: Sequence[str] | None = None, out: TextIO | None = None, err: Text
             applied = run_apply(args, settings, err)
             emit(result_payload(command, applied.body, as_json=as_json), as_json=as_json, stream=out, max_cell_chars=max_cell_chars)
             return applied.exit_code
+        if command == "import-realm":
+            settings = load_settings(config_flag=args.config, realm_flag=args.realm, runtime_flag=args.runtime)
+            max_cell_chars = settings.max_cell_chars
+            body = run_import(args, settings, err)
+            emit(result_payload(command, body, as_json=as_json), as_json=as_json, stream=out, max_cell_chars=max_cell_chars)
+            return 0
         if command == "export-realm" and args.scope == "full":
             settings = load_settings(config_flag=args.config, realm_flag=args.realm, runtime_flag=args.runtime)
             max_cell_chars = settings.max_cell_chars

@@ -198,11 +198,11 @@ Nothing in this list is committed. Commit only when the owner asks. Once asked, 
   - Acceptance: C84, C87, C88, C89, C90, C91, C92 run through the tool. Each test result is written into the spec §8 status fields and the section 11 item 30 evidence.
   - Depends on: I13, I20, I21.
   - Status: `[x]` done 2026-11-01. Run on a throw-away server on port 8082 (container `kc-axi-i22`, volume `kc-axi-i22-data`); `up` is not wired yet, so podman started it. C84, C87, C88, C89, C90, C91 (key ids) and C92 passed through the tool. The run found a defect: an unwritable `secrets_dir` ended the backup step in a traceback. Fixed in `fullrealm._take_backup` (exit 1 `file_failed`) with a test whose mutation check fails without the fix. C85 and C86 were not run live. The port is 8082, not 8081 as planned, because `keycloak-restore` holds 8081.
-- [ ] **I23. Docs sync for the full file.** Spec §4.1, §5.7, §5.12, §8, §11 item 30.
+- [x] **I23. Docs sync for the full file.** Spec §4.1, §5.7, §5.12, §8, §11 item 30.
   - Does: the package README (exit codes, the `import_invalid` and `import_partial` rows, the step names of I19), the spec status fields, and `python3 -I scripts/md2html.py README.md README.html`.
   - Acceptance: the code cross-check test of `errors.py` against spec §7 passes. The HTML twin is regenerated from the final spec.
   - Depends on: I20, I21, I22.
-  - Status: not started.
+  - Status: `[x]` done 2026-11-01. Spec §4.1 `--runtime` row covers the full export and import. §7 recoverability table now lists `import_invalid` (permanent) and `import_partial` (transient); before this task the table lacked 17 registered codes, two of them new; 15 older codes are still missing and are not added here. §8 C85 and C86 record stub-test status, not live. The §4.4 cross-check (`tests/test_output_errors.py`) passes. README.html regenerated.
 
 ## Test and release tasks
 

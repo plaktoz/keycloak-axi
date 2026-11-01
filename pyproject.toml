@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kc-axi"
+dynamic = ["version"]
+description = "Run a local Keycloak and manage one realm as desired state, through an agent-friendly CLI."
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0.3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+kc-axi = "kc_axi.cli:main"
+
+[tool.hatch.version]
+path = "src/kc_axi/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kc_axi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "runtime: needs a container runtime (Podman or Docker); skipped when none is present",
+]

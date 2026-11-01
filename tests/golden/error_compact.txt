@@ -1,0 +1,4 @@
+error: keycloak_unreachable
+message: no answer from http://127.0.0.1:8080 after 10 seconds
+help[1]:
+  kc-axi status

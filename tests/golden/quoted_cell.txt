@@ -1,0 +1,2 @@
+items[1 of 1]{username,enabled}:
+  "a,""b"" c",true

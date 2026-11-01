@@ -1,0 +1,7 @@
+status: active
+total: 21
+items[2 of 21]{username,enabled}:
+  alice,true
+  bob,false
+help[1]:
+  kc-axi users --realm acme --limit 21

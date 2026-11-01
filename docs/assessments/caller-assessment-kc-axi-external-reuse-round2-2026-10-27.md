@@ -1,6 +1,6 @@
 # Caller assessment: kc-axi, external reuse, round 2
 
-Date: 2026-10-27 · Spec assessed: [libs/kc-axi/README.md](../../libs/kc-axi/README.md) (Draft v0.3) · Round 1: [caller-assessment-kc-axi-external-reuse-2026-10-27.md](./caller-assessment-kc-axi-external-reuse-2026-10-27.md)
+Date: 2026-10-27 · Spec assessed: [README.md](../../README.md) (Draft v0.3) · Round 1: [caller-assessment-kc-axi-external-reuse-2026-10-27.md](./caller-assessment-kc-axi-external-reuse-2026-10-27.md)
 Perspective: a team with a Python or TypeScript service, a local Keycloak for development, and an operator who is not the author. No knowledge of UMAS. Linux, Windows or macOS.
 
 Method: the spec was read in full and checked against itself, against `libs/README.md`, and against `libs/event-log/README.md` section 4.1. Nothing was run. Owner decisions and live facts were treated as true and were not raised as gaps. Section numbers and line numbers refer to the v0.3 file as read today.
